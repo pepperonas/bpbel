@@ -44,6 +44,31 @@ class AudioChainTest {
         return out
     }
 
+    /** A full backbeat groove: 55 Hz kick on every beat PLUS a loud
+     *  200 Hz "snare" on the off-beats (2 & 4). A naive wideband detector
+     *  fires on both → 2 onsets/beat → reports 2× the tempo. The kick
+     *  band must reject the 200 Hz snare and report the TRUE tempo. */
+    private fun synthWithSnare(bpm: Double, seconds: Double): FloatArray {
+        val total = (seconds * sampleRate).toInt()
+        val out = FloatArray(total)
+        val beat = (60.0 / bpm * sampleRate).toInt()
+        for (i in 0 until total) {
+            val posInBeat = i % beat
+            val tb = posInBeat.toDouble() / sampleRate
+            val beatIndex = i / beat
+            // Kick on every beat (55 Hz).
+            val kDecay = exp(-tb / 0.06)
+            var s = 0.9 * kDecay * sin(2 * PI * 55.0 * tb)
+            // Snare on beats 2 & 4 (200 Hz body), louder than the kick.
+            if (beatIndex % 2 == 1) {
+                val sDecay = exp(-tb / 0.08)
+                s += 1.1 * sDecay * sin(2 * PI * 200.0 * tb)
+            }
+            out[i] = s.toFloat()
+        }
+        return out
+    }
+
     private fun detect(signal: FloatArray): Double {
         val bandpass = KickBandpass(sampleRate)
         val analyzer = BpmAnalyzer()
@@ -71,5 +96,13 @@ class AudioChainTest {
         // House/techno: 128 BPM, kick fundamental energy near 75 Hz.
         val bpm = detect(synth(bpm = 128.0, seconds = 12.0, kickHz = 75.0))
         assertTrue("expected ~128 BPM, got $bpm", bpm in 120.0..136.0)
+    }
+
+    @Test
+    fun doesNotDoubleTempoOnABackbeatSnare() {
+        // 100 BPM groove with a loud 200 Hz snare on 2 & 4. Must report
+        // ~100, NOT ~200 (the classic snare-induced octave error).
+        val bpm = detect(synthWithSnare(bpm = 100.0, seconds = 12.0))
+        assertTrue("expected ~100 BPM (not doubled), got $bpm", bpm in 92.0..108.0)
     }
 }

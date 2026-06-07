@@ -14,7 +14,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-1.11-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Material 3 Expressive](https://img.shields.io/badge/Material%203-Expressive-FF6F61?logo=materialdesign&logoColor=white)](https://m3.material.io)
 [![AGP](https://img.shields.io/badge/AGP-8.13.1-02303A?logo=gradle&logoColor=white)](https://developer.android.com/build)
-[![Tests](https://img.shields.io/badge/unit%20tests-17%20passing-success?logo=junit5&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/unit%20tests-20%20passing-success?logo=junit5&logoColor=white)](#-testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Package](https://img.shields.io/badge/package-io.celox.bpbel-blueviolet)](#)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
@@ -36,9 +36,9 @@ bpbel hört über das Mikrofon die Musik in deiner Umgebung und zeigt **live**:
 - 🥁 **BPM** (Beats per Minute) — das Tempo des laufenden Tracks, erkannt über Kick-Onset-Detection.
 - 🔊 **Dezibel** (dBFS) — die aktuelle Lautstärke, als animiertes Segment-Meter mit Peak-Hold.
 
-Beides wird in einer **Material 3 Expressive** Oberfläche visualisiert: eine morphende Pulse-Form,
-die im Takt der erkannten Beats federt (Spring-Physik), lebendige Verlaufsfarben, Glow-Ringe und
-eine ruhige, atmende Hintergrund-Animation.
+Beides wird in einer **Material 3 Expressive** Oberfläche visualisiert: ein Orb mit dunklem Kern
+(damit die Zahl lesbar bleibt), der im Takt federt, bei jedem Beat Sonar-Ringe aussendet, von einem
+Glow-Arc umkreist wird und in lebendigen Verlaufsfarben schimmert.
 
 ---
 
@@ -63,15 +63,15 @@ APK auf dem Android-Gerät öffnen und installieren (ggf. „Installation aus un
 Der Detektor ist ein **energie-basierter Onset-Detector mit IOI-Clustering** (Inter-Onset-Interval) —
 der klassische, praxiserprobte Ansatz für 4/4-Musik mit klarem Kick (typische Genauigkeit 85–95 %).
 Die Kernlogik ([`BpmAnalyzer.kt`](app/src/main/java/io/celox/bpbel/audio/BpmAnalyzer.kt)) ist ein
-1:1-Port eines kampferprobten TypeScript-Detektors und wird durch eine **portierte Test-Suite**
-(17 Tests) gegen das Original abgesichert.
+1:1-Port eines kampferprobten TypeScript-Detektors und wird durch eine **portierte Test-Suite** plus
+End-to-End-DSP-Tests (20 Tests) gegen das Original abgesichert.
 
 ```
 Mikrofon (AudioRecord, 44.1 kHz mono PCM-16)
    │
    ├──▶ Full-band RMS ─────────▶ dBFS            ──▶ Lautstärke-Meter
    │
-   └──▶ Kick-Bandpass (30–100 Hz, 2× Biquad)
+   └──▶ Kick-Bandpass (~50–120 Hz, kick-only, resonant)
             │
             ├─▶ RMS-Energie pro 1024-Sample-Frame
             ├─▶ gleitender Mittelwert (Baseline-Gate)
@@ -94,9 +94,9 @@ Viertel-Puls liefert ~0,9, Sprache/Rauschen ~0,1.
 | Element | Umsetzung |
 |---|---|
 | **Theme** | [`MaterialExpressiveTheme`](app/src/main/java/io/celox/bpbel/ui/theme/Theme.kt) — alle M3-Komponenten erben das feder-basierte *expressive* `MotionScheme`. |
-| **Motion** | Beat-Puls über `Animatable` + `spring(dampingRatio = 0.34)` → lebendiger Overshoot. |
+| **Motion** | Beat-Puls über Feder-Physik (`spring`, Overshoot), Sonar-Ringe pro Beat, umlaufender Glow-Arc, Liquid-Sweep-Gradient, BPM-Count-up. |
 | **Shapes** | Morphing Circle ↔ Star via `androidx.graphics:graphics-shapes` (`Morph`, `RoundedPolygon`). |
-| **Color** | Vibrantes Violett → Magenta → Cyan; **Dynamic Color** auf Android 12+. |
+| **Color** | Durchgängig dunkles, kuratiertes Theme (Violett → Magenta → Cyan) — club-style, garantiert lesbare Hell-auf-Dunkel-Readouts. |
 | **Typografie** | Emphasized Type-Scale (Black/Bold) für die Hero-Numerik. |
 
 ---
@@ -134,6 +134,10 @@ bei bekannten Tempi (90/120/175 BPM, Half-/Double-Time) und prüft Lock-on, Okta
 Refraktärzeit, Stale-Reset, Oktav-Snap und Konfidenz — als Beweis, dass der Kotlin-Port das
 Verhalten des Referenz-Algorithmus exakt reproduziert.
 
+[`AudioChainTest`](app/src/test/java/io/celox/bpbel/AudioChainTest.kt) treibt die **echte**
+`KickBandpass` → `BpmAnalyzer`-Kette mit realistischem Frame-Timing und prüft u. a., dass ein
+Backbeat-Snare das Tempo **nicht verdoppelt**.
+
 ---
 
 ## 🏗️ Projektstruktur
@@ -143,7 +147,7 @@ app/src/main/java/io/celox/bpbel/
 ├── MainActivity.kt              # Permission-Flow + Engine-Lifecycle
 ├── audio/
 │   ├── BpmAnalyzer.kt           # Onset/IOI-Tempo-Detektor (portiert)
-│   ├── Biquad.kt                # RBJ-Biquad + Kick-Bandpass (30–100 Hz)
+│   ├── Biquad.kt                # RBJ-Biquad + Kick-Bandpass (~50–120 Hz)
 │   └── AudioEngine.kt           # AudioRecord → dBFS + BPM → StateFlow
 └── ui/
     ├── BpmScreen.kt             # Screen-Layout + Permission-States

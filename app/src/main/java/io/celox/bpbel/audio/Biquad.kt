@@ -63,23 +63,29 @@ class Biquad private constructor(
 }
 
 /**
- * Beat band-pass tuned for **phone microphones**.
+ * Kick-isolating band-pass, tuned to get **one onset per beat** on a
+ * phone mic — the key to a correct (non-doubled) tempo.
  *
- * The reference (laptop/Web-Audio) detector used 30-100 Hz to isolate
- * the kick fundamental. On Android that band is useless: MEMS phone
- * mics roll off hard below ~100-150 Hz, so almost no energy survives in
- * 30-100 Hz → no onsets → BPM never locks (while full-band loudness
- * still works fine — exactly the "dB moves, BPM stuck" symptom).
+ * The cardinal rule for avoiding octave-doubling: keep the **upper
+ * corner below ~150 Hz**, the snare's body. If the snare (backbeat) or
+ * hi-hats leak in, the detector fires ~2-4 onsets per beat, the median
+ * inter-onset interval halves, and the reported BPM doubles. So we band
+ * to roughly **50-120 Hz** — only the kick lives there.
  *
- * We therefore use **60-200 Hz**: the kick's upper harmonics + bass
- * fundamentals, which sit inside the phone mic's responsive range and
- * still carry the periodic beat, while rejecting most vocal/snare/
- * cymbal energy that would muddy the tempo. Butterworth-flat Q so the
- * whole band contributes energy. Stateful — one instance per stream.
+ * Phone MEMS mics roll off below ~100 Hz, so we don't sit at the kick
+ * fundamental (~40-60 Hz) where the mic has thrown the energy away;
+ * instead the **low-pass has a resonant Q≈2** peaking near 110-120 Hz,
+ * lifting the part of the kick that survives the rolloff knee while the
+ * skirt still rejects the snare. The energy-onset detector uses a
+ * *relative* (moving-average ratio) threshold, so even an attenuated
+ * kick still reads as a clear spike. (Q is kept ≤ ~3 so the filter
+ * doesn't ring and smear transient timing → IOI precision.)
+ *
+ * Stateful — one instance per audio stream.
  */
 class KickBandpass(sampleRate: Int) {
-    private val hp = Biquad.highpass(sampleRate, 60.0, 1.0 / sqrt(2.0))
-    private val lp = Biquad.lowpass(sampleRate, 200.0, 1.0 / sqrt(2.0))
+    private val hp = Biquad.highpass(sampleRate, 50.0, 1.0 / sqrt(2.0))
+    private val lp = Biquad.lowpass(sampleRate, 120.0, 2.0)
 
     /** Filter a block in place into a fresh array. */
     fun process(input: FloatArray): FloatArray {

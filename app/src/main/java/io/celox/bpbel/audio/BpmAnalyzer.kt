@@ -53,9 +53,10 @@ object BpmConfig {
     const val AVG_WINDOW_MS = 3000.0
 
     /** Chunk energy must exceed `avg × threshold` to count as an onset.
-     *  Lowered 1.4 → 1.3 for a live phone mic: real-room kicks have a
-     *  smaller energy-over-baseline ratio than a clean digital signal. */
-    const val ONSET_THRESHOLD = 1.3
+     *  1.4 (as in the reference detector): high enough that only genuine
+     *  kick transients fire, not bass swells — keeping ~one onset/beat so
+     *  the tempo doesn't double. */
+    const val ONSET_THRESHOLD = 1.4
 
     /** Minimum gap between successive onsets (max 200 BPM). */
     const val ONSET_REFRACTORY_MS = 300.0

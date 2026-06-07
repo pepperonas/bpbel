@@ -1,16 +1,10 @@
 package io.celox.bpbel.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 
 private val DarkColors: ColorScheme = darkColorScheme(
     primary = Violet80,
@@ -32,33 +26,24 @@ private val DarkColors: ColorScheme = darkColorScheme(
     outline = OnSurfaceDim,
 )
 
-private val LightColors: ColorScheme = lightColorScheme(
-    primary = Violet40,
-    secondary = Magenta60,
-    tertiary = Cyan60,
-)
-
 /**
  * Material 3 **Expressive** theme. We use [MaterialExpressiveTheme]
  * (not [androidx.compose.material3.MaterialTheme]) so every M3
  * component inherits the spring-based expressive [MotionScheme] by
- * default. Dynamic color is used on Android 12+ when available.
+ * default.
+ *
+ * bpbel is a dark, club-style audio visualizer: it **always** uses the
+ * curated dark, high-saturation palette. Forcing dark (instead of
+ * following the system / dynamic light color) guarantees the bright
+ * readouts stay readable and preserves the brand identity — a light
+ * system theme previously produced unreadable light-on-light text.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BpbelTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-
-        darkTheme -> DarkColors
-        else -> LightColors
-    }
+    val colorScheme = DarkColors
 
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
