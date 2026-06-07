@@ -1,0 +1,24 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Centered audio-bars / heartbeat motif within the 72dp safe zone. -->
+    <group android:translateX="0" android:translateY="0">
+        <path
+            android:fillColor="#D0BCFF"
+            android:pathData="M40,46 h6 v16 h-6 z" />
+        <path
+            android:fillColor="#B69DF8"
+            android:pathData="M50,38 h6 v32 h-6 z" />
+        <path
+            android:fillColor="#EFB8C8"
+            android:pathData="M60,30 h6 v48 h-6 z" />
+        <path
+            android:fillColor="#B69DF8"
+            android:pathData="M70,38 h6 v32 h-6 z" />
+        <path
+            android:fillColor="#D0BCFF"
+            android:pathData="M80,46 h6 v16 h-6 z" />
+    </group>
+</vector>

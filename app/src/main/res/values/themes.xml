@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme handed to the Activity before Compose takes over.
+         Edge-to-edge, no ActionBar; the real Material 3 Expressive
+         theming lives in Theme.kt. -->
+    <style name="Theme.Bpbel" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/bpbel_bg</item>
+    </style>
+</resources>
