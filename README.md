@@ -4,6 +4,9 @@
 
 ### Real-time **BPM** & **decibel** detection for Android — wrapped in a Material 3 *Expressive* interface.
 
+[![Release](https://img.shields.io/github/v/release/pepperonas/bpbel?logo=github&label=release&color=8A2BE2)](https://github.com/pepperonas/bpbel/releases/latest)
+[![Download APK](https://img.shields.io/github/downloads/pepperonas/bpbel/total?logo=android&label=downloads&color=3DDC84)](https://github.com/pepperonas/bpbel/releases/latest)
+[![Release workflow](https://img.shields.io/github/actions/workflow/status/pepperonas/bpbel/release.yml?logo=githubactions&logoColor=white&label=release%20build)](https://github.com/pepperonas/bpbel/actions/workflows/release.yml)
 [![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-orange)](https://developer.android.com/tools/releases/platforms#8.0)
 [![Target SDK](https://img.shields.io/badge/targetSdk-36-brightgreen)](https://developer.android.com/tools/releases/platforms)
@@ -36,6 +39,22 @@ bpbel hört über das Mikrofon die Musik in deiner Umgebung und zeigt **live**:
 Beides wird in einer **Material 3 Expressive** Oberfläche visualisiert: eine morphende Pulse-Form,
 die im Takt der erkannten Beats federt (Spring-Physik), lebendige Verlaufsfarben, Glow-Ringe und
 eine ruhige, atmende Hintergrund-Animation.
+
+---
+
+## 📥 Download
+
+Die fertige, signierte App gibt es in der **[Releases-Sektion](https://github.com/pepperonas/bpbel/releases/latest)**:
+
+👉 **[Neueste APK herunterladen](https://github.com/pepperonas/bpbel/releases/latest)** — `bpbel-vX.Y.Z.apk`
+
+APK auf dem Android-Gerät öffnen und installieren (ggf. „Installation aus unbekannten Quellen" für deinen Browser/Dateimanager erlauben). Alle Releases sind mit demselben Schlüssel signiert, sodass Updates direkt über eine bestehende Installation laufen.
+
+> **Für Maintainer — neues Release veröffentlichen:** `versionCode`/`versionName` in [`app/build.gradle.kts`](app/build.gradle.kts) erhöhen, committen, dann taggen:
+> ```bash
+> git tag v1.0.1 && git push origin v1.0.1
+> ```
+> Der [Release-Workflow](.github/workflows/release.yml) baut die signierte APK und hängt sie automatisch an einen neuen GitHub Release.
 
 ---
 

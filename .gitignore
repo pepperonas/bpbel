@@ -36,3 +36,4 @@ captures/
 # Keystore files (keep secrets out)
 *.jks
 *.keystore
+keystore.properties
