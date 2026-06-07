@@ -52,8 +52,10 @@ object BpmConfig {
     /** Moving-average baseline window for energy. */
     const val AVG_WINDOW_MS = 3000.0
 
-    /** Chunk energy must exceed `avg × threshold` to count as an onset. */
-    const val ONSET_THRESHOLD = 1.4
+    /** Chunk energy must exceed `avg × threshold` to count as an onset.
+     *  Lowered 1.4 → 1.3 for a live phone mic: real-room kicks have a
+     *  smaller energy-over-baseline ratio than a clean digital signal. */
+    const val ONSET_THRESHOLD = 1.3
 
     /** Minimum gap between successive onsets (max 200 BPM). */
     const val ONSET_REFRACTORY_MS = 300.0
@@ -91,12 +93,17 @@ class BpmAnalyzer {
     private var displayBpm = 0.0
     private var justFiredBeat = false
     private var lastValidEstimateAt = Double.NEGATIVE_INFINITY
+    /** Timestamp of the first push since construction/reset. The
+     *  baseline-calibration gate opens once we've accumulated
+     *  [BpmConfig.AVG_WINDOW_MS] of audio after this point. */
+    private var firstPushAt = Double.NaN
 
     /** Feed one chunk of (band-pass-filtered) audio samples.
      *  `samples` are float in [-1, 1]; `nowMs` is monotonically
      *  increasing milliseconds. */
     fun push(samples: FloatArray, nowMs: Double) {
         justFiredBeat = false
+        if (firstPushAt.isNaN()) firstPushAt = nowMs
 
         val energy = rms(samples)
         energyHistory.addLast(EnergyChunk(nowMs, energy))
@@ -106,13 +113,20 @@ class BpmAnalyzer {
             energyHistory.removeFirst()
         }
 
-        // Baseline-calibration gate: wait until the energy buffer
-        // actually spans the full AVG_WINDOW_MS so the threshold is
+        // Baseline-calibration gate: wait until ~AVG_WINDOW_MS of audio
+        // has accumulated since the first push, so the threshold is
         // calibrated against a real music-level baseline before any
         // onset is allowed through. Avoids the false-onset burst on
         // startup that otherwise reads "too fast" for ~15-20 s.
+        //
+        // NB: this gates on *elapsed time since the first push*, not on
+        // the age of the oldest retained chunk. The latter (the original
+        // formulation) only ever opens when a chunk lands exactly at age
+        // AVG_WINDOW_MS — true for synthetic on-grid timing, but with
+        // real ~23 ms irregular audio frames that boundary is never hit,
+        // so the gate would stay shut forever and BPM would never lock.
         if (energyHistory.isEmpty() ||
-            nowMs - energyHistory.first().time < BpmConfig.AVG_WINDOW_MS
+            nowMs - firstPushAt < BpmConfig.AVG_WINDOW_MS
         ) {
             return
         }
@@ -220,6 +234,7 @@ class BpmAnalyzer {
         displayBpm = 0.0
         justFiredBeat = false
         lastValidEstimateAt = Double.NEGATIVE_INFINITY
+        firstPushAt = Double.NaN
     }
 
     /** Current chunk RMS energy. Exposed for the UI input-meter. */

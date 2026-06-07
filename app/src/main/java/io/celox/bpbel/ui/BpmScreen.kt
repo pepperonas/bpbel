@@ -210,7 +210,7 @@ private fun LoudnessSection(state: AudioUiState) {
                     color = scheme.onSurface,
                 )
                 Text(
-                    text = formatDbfs(state.dbfs, AudioUiState.DB_FLOOR),
+                    text = formatDbfs(state.displayDbfs, AudioUiState.DB_FLOOR),
                     style = MaterialTheme.typography.titleMedium,
                     color = scheme.tertiary,
                     fontWeight = FontWeight.Bold,

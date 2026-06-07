@@ -63,15 +63,23 @@ class Biquad private constructor(
 }
 
 /**
- * The kick-drum band-pass from the original audio graph:
- *   highpass 30 Hz (Q≈0.707) → lowpass 100 Hz (Q=1.5).
- * The 1.5-Q lowpass leaves a small resonance peak near the kick
- * fundamental. Produces the clean kick-only signal the onset detector
- * expects. Stateful — one instance per audio stream.
+ * Beat band-pass tuned for **phone microphones**.
+ *
+ * The reference (laptop/Web-Audio) detector used 30-100 Hz to isolate
+ * the kick fundamental. On Android that band is useless: MEMS phone
+ * mics roll off hard below ~100-150 Hz, so almost no energy survives in
+ * 30-100 Hz → no onsets → BPM never locks (while full-band loudness
+ * still works fine — exactly the "dB moves, BPM stuck" symptom).
+ *
+ * We therefore use **60-200 Hz**: the kick's upper harmonics + bass
+ * fundamentals, which sit inside the phone mic's responsive range and
+ * still carry the periodic beat, while rejecting most vocal/snare/
+ * cymbal energy that would muddy the tempo. Butterworth-flat Q so the
+ * whole band contributes energy. Stateful — one instance per stream.
  */
 class KickBandpass(sampleRate: Int) {
-    private val hp = Biquad.highpass(sampleRate, 30.0, 1.0 / sqrt(2.0))
-    private val lp = Biquad.lowpass(sampleRate, 100.0, 1.5)
+    private val hp = Biquad.highpass(sampleRate, 60.0, 1.0 / sqrt(2.0))
+    private val lp = Biquad.lowpass(sampleRate, 200.0, 1.0 / sqrt(2.0))
 
     /** Filter a block in place into a fresh array. */
     fun process(input: FloatArray): FloatArray {

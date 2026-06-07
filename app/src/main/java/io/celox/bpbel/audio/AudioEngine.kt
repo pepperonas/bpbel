@@ -20,8 +20,12 @@ data class AudioUiState(
     /** Monotonic counter incremented on every detected beat. The UI
      *  keys its pulse animation off changes to this value. */
     val beatTick: Long = 0L,
-    /** Full-band loudness in dBFS, clamped to [DB_FLOOR, 0]. */
+    /** Full-band loudness in dBFS, clamped to [DB_FLOOR, 0]. Fast/raw —
+     *  drives the reactive bar meter. */
     val dbfs: Double = DB_FLOOR,
+    /** Heavily-smoothed dBFS for the numeric readout, so the displayed
+     *  number is calm enough to read instead of flickering every frame. */
+    val displayDbfs: Double = DB_FLOOR,
     /** Band-passed RMS (kick band), 0..~1. Drives the input meter. */
     val energy: Double = 0.0,
     val listening: Boolean = false,
@@ -41,7 +45,7 @@ data class AudioUiState(
  * Audio path:
  *   AudioRecord (mono PCM-16 @ 44.1 kHz)
  *     → full-band RMS → dBFS                (loudness meter)
- *     → KickBandpass (30-100 Hz) → BpmAnalyzer.push/estimate  (tempo)
+ *     → KickBandpass (60-200 Hz) → BpmAnalyzer.push/estimate  (tempo)
  *
  * Results are published on [state] (a [StateFlow]) at frame rate
  * (~43 frames/s with a 1024-sample frame), which Compose collects.
@@ -93,6 +97,7 @@ class AudioEngine {
         val pcm = ShortArray(FRAME)
         val floats = FloatArray(FRAME)
         var beatTick = _state.value.beatTick
+        var smoothedDb = AudioUiState.DB_FLOOR
 
         try {
             record.startRecording()
@@ -117,6 +122,9 @@ class AudioEngine {
                 } else {
                     AudioUiState.DB_FLOOR
                 }
+                // One-pole smoothing (~0.4 s time constant at 43 fps) for
+                // the readable numeric dB; the bar meter still uses `dbfs`.
+                smoothedDb += (dbfs - smoothedDb) * 0.08
 
                 // Band-pass for the kick, then onset/tempo analysis.
                 val now = SystemClock.elapsedRealtime().toDouble()
@@ -129,6 +137,7 @@ class AudioEngine {
                     confidence = est.confidence,
                     beatTick = beatTick,
                     dbfs = dbfs,
+                    displayDbfs = smoothedDb,
                     energy = analyzer.currentEnergy(),
                     listening = true,
                 )
