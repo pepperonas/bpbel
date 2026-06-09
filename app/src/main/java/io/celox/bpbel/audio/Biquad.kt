@@ -1,8 +1,8 @@
 package io.celox.bpbel.audio
 
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
  * Transposed-Direct-Form-II biquad, coefficients per the Audio EQ
@@ -63,29 +63,29 @@ class Biquad private constructor(
 }
 
 /**
- * Kick-isolating band-pass, tuned to get **one onset per beat** on a
- * phone mic — the key to a correct (non-doubled) tempo.
+ * Kick-drum band-pass — an **exact** reproduction of the audio graph in
+ * the `inspector-rust` reference detector (`BpmDetector.tsx`):
  *
- * The cardinal rule for avoiding octave-doubling: keep the **upper
- * corner below ~150 Hz**, the snare's body. If the snare (backbeat) or
- * hi-hats leak in, the detector fires ~2-4 onsets per beat, the median
- * inter-onset interval halves, and the reported BPM doubles. So we band
- * to roughly **50-120 Hz** — only the kick lives there.
+ *   highpass 30 Hz (Q 0.7) → lowpass 100 Hz (Q 1.5)
  *
- * Phone MEMS mics roll off below ~100 Hz, so we don't sit at the kick
- * fundamental (~40-60 Hz) where the mic has thrown the energy away;
- * instead the **low-pass has a resonant Q≈2** peaking near 110-120 Hz,
- * lifting the part of the kick that survives the rolloff knee while the
- * skirt still rejects the snare. The energy-onset detector uses a
- * *relative* (moving-average ratio) threshold, so even an attenuated
- * kick still reads as a clear spike. (Q is kept ≤ ~3 so the filter
- * doesn't ring and smear transient timing → IOI precision.)
+ * The 30 Hz high-pass cuts room rumble / BT-speaker thump; the 100 Hz
+ * low-pass isolates the kick body and drops vocals / snare attack out of
+ * the energy signal (the reference narrowed this from 150 → 100 Hz
+ * precisely because high-end bleed "was making the BPM jump"). Keeping
+ * the upper corner at 100 Hz is what yields ~one onset per beat — and
+ * therefore the correct, non-doubled tempo.
+ *
+ * **Web Audio Q semantics:** for `lowpass`/`highpass`, the Web Audio
+ * `BiquadFilterNode.Q` is interpreted **in dB**, so the linear Q used in
+ * the RBJ cookbook formula is `10^(Q_dB / 20)`. We convert here so the
+ * filter response is bit-for-bit equivalent to the browser's — the same
+ * `0.7`/`1.5` the reference passes to Web Audio.
  *
  * Stateful — one instance per audio stream.
  */
 class KickBandpass(sampleRate: Int) {
-    private val hp = Biquad.highpass(sampleRate, 50.0, 1.0 / sqrt(2.0))
-    private val lp = Biquad.lowpass(sampleRate, 120.0, 2.0)
+    private val hp = Biquad.highpass(sampleRate, 30.0, qFromDb(0.7))
+    private val lp = Biquad.lowpass(sampleRate, 100.0, qFromDb(1.5))
 
     /** Filter a block in place into a fresh array. */
     fun process(input: FloatArray): FloatArray {
@@ -101,3 +101,7 @@ class KickBandpass(sampleRate: Int) {
         lp.reset()
     }
 }
+
+/** Web Audio interprets the `Q` of lowpass/highpass filters in dB; the
+ *  linear quality factor used in the RBJ formula is `10^(Q_dB / 20)`. */
+private fun qFromDb(qDb: Double): Double = 10.0.pow(qDb / 20.0)

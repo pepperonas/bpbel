@@ -71,7 +71,7 @@ Mikrofon (AudioRecord, 44.1 kHz mono PCM-16)
    │
    ├──▶ Full-band RMS ─────────▶ dBFS            ──▶ Lautstärke-Meter
    │
-   └──▶ Kick-Bandpass (~50–120 Hz, kick-only, resonant)
+   └──▶ Kick-Bandpass (Highpass 30 Hz → Lowpass 100 Hz, kick-only)
             │
             ├─▶ RMS-Energie pro 1024-Sample-Frame
             ├─▶ gleitender Mittelwert (Baseline-Gate)
@@ -147,7 +147,7 @@ app/src/main/java/io/celox/bpbel/
 ├── MainActivity.kt              # Permission-Flow + Engine-Lifecycle
 ├── audio/
 │   ├── BpmAnalyzer.kt           # Onset/IOI-Tempo-Detektor (portiert)
-│   ├── Biquad.kt                # RBJ-Biquad + Kick-Bandpass (~50–120 Hz)
+│   ├── Biquad.kt                # RBJ-Biquad + Kick-Bandpass (30→100 Hz, exakt wie inspector-rust)
 │   └── AudioEngine.kt           # AudioRecord → dBFS + BPM → StateFlow
 └── ui/
     ├── BpmScreen.kt             # Screen-Layout + Permission-States

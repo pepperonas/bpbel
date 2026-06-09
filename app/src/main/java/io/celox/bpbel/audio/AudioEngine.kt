@@ -45,7 +45,7 @@ data class AudioUiState(
  * Audio path:
  *   AudioRecord (mono PCM-16 @ 44.1 kHz)
  *     → full-band RMS → dBFS                (loudness meter)
- *     → KickBandpass (~50-120 Hz, kick only) → BpmAnalyzer  (tempo)
+ *     → KickBandpass (30-100 Hz, exact inspector-rust graph) → BpmAnalyzer
  *
  * Results are published on [state] (a [StateFlow]) at frame rate
  * (~43 frames/s with a 1024-sample frame), which Compose collects.
