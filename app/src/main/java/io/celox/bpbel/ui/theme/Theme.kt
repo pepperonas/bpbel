@@ -3,6 +3,7 @@ package io.celox.bpbel.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
@@ -48,8 +49,11 @@ fun BpbelTheme(
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         typography = BpbelTypography,
-        // motionScheme / shapes intentionally omitted — defaults to the
-        // expressive motion scheme + expressive shapes.
+        // Explicit spring-physics motion scheme. Every M3 component — and
+        // our own animations, via `MaterialTheme.motionScheme.*Spec()` —
+        // inherit these expressive springs. `shapes` stays implicit
+        // (expressive defaults).
+        motionScheme = MotionScheme.expressive(),
         content = content,
     )
 }

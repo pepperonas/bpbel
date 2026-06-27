@@ -1,16 +1,18 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package io.celox.bpbel.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,8 +65,18 @@ fun BeatPulse(
     primary: Color,
     secondary: Color,
     tertiary: Color,
+    reduceMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // Themed spring specs: the beat punch is a scale/shape change → Spatial
+    // (overshoot wanted); the rim/glow flare is primarily an opacity flash →
+    // Effects (no overshoot); the sonar ring is an expanding radius → slow
+    // Spatial.
+    val motion = MaterialTheme.motionScheme
+    val pulseSpec = motion.defaultSpatialSpec<Float>()
+    val flareSpec = motion.defaultEffectsSpec<Float>()
+    val rippleSpec = motion.slowSpatialSpec<Float>()
+
     val morph = remember {
         val circle = RoundedPolygon.circle(numVertices = 12, radius = 1f)
         val star = RoundedPolygon.star(
@@ -77,18 +89,19 @@ fun BeatPulse(
     }
     val reusablePath = remember { android.graphics.Path() }
 
-    // Beat punch (scale overshoot) + rim/morph flare.
+    // Beat punch (scale overshoot) + rim/morph flare. Both suppressed under
+    // reduce-motion (the orb then reflects level/confidence statically).
     val pulse = remember { Animatable(1f) }
     val flare = remember { Animatable(0f) }
     LaunchedEffect(beatTick) {
-        if (beatTick == 0L) return@LaunchedEffect
+        if (beatTick == 0L || reduceMotion) return@LaunchedEffect
         pulse.snapTo(1.20f)
-        pulse.animateTo(1f, spring(dampingRatio = 0.32f, stiffness = Spring.StiffnessMedium))
+        pulse.animateTo(1f, pulseSpec)
     }
     LaunchedEffect(beatTick) {
-        if (beatTick == 0L) return@LaunchedEffect
+        if (beatTick == 0L || reduceMotion) return@LaunchedEffect
         flare.snapTo(1f)
-        flare.animateTo(0f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow))
+        flare.animateTo(0f, flareSpec)
     }
 
     // Sonar ripples — independent coroutines so a new beat doesn't
@@ -97,13 +110,13 @@ fun BeatPulse(
     val ripples = remember { List(RIPPLE_POOL) { Animatable(1f) } }
     val rippleIdx = remember { mutableIntStateOf(0) }
     LaunchedEffect(beatTick) {
-        if (beatTick == 0L) return@LaunchedEffect
+        if (beatTick == 0L || reduceMotion) return@LaunchedEffect
         val i = rippleIdx.intValue
         rippleIdx.intValue = (i + 1) % RIPPLE_POOL
         val ring = ripples[i]
         scope.launch {
             ring.snapTo(0f)
-            ring.animateTo(1f, tween(1300, easing = FastOutSlowInEasing))
+            ring.animateTo(1f, rippleSpec)
         }
     }
 
@@ -125,12 +138,18 @@ fun BeatPulse(
         label = "breathe",
     )
 
+    // Ambient loops are infinite, so they stay duration-based (springs can't
+    // loop). Under reduce-motion they freeze to a still frame.
+    val spinDeg = if (reduceMotion) 0f else spin
+    val arcDeg = if (reduceMotion) 0f else arcSpin
+    val breatheV = if (reduceMotion) 0f else breathe
+
     Canvas(modifier = modifier) {
         val cx = size.width / 2f
         val cy = size.height / 2f
         val center = Offset(cx, cy)
         val baseR = min(size.width, size.height) / 2f * 0.58f
-        val idleSwell = 1f + breathe * 0.03f
+        val idleSwell = 1f + breatheV * 0.03f
         val r = baseR * pulse.value * (1f + loudness * 0.10f) * idleSwell
 
         // 1) Sonar rings (behind everything).
@@ -149,7 +168,7 @@ fun BeatPulse(
         }
 
         // 2) Outer bloom — breathing glow, brighter with confidence/beat.
-        val bloomR = r * (1.9f + breathe * 0.15f)
+        val bloomR = r * (1.9f + breatheV * 0.15f)
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
@@ -165,26 +184,28 @@ fun BeatPulse(
             blendMode = BlendMode.Plus,
         )
 
-        // 3) Orbiting comet-arc.
-        rotate(arcSpin, pivot = center) {
-            drawCircle(
-                brush = Brush.sweepGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        Color.Transparent,
-                        Color.Transparent,
-                        tertiary.copy(alpha = 0.0f),
-                        tertiary.copy(alpha = 0.9f),
-                        Color.White.copy(alpha = 0.7f),
-                        Color.Transparent,
+        // 3) Orbiting comet-arc — decorative, so skipped under reduce-motion.
+        if (!reduceMotion) {
+            rotate(arcDeg, pivot = center) {
+                drawCircle(
+                    brush = Brush.sweepGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Transparent,
+                            Color.Transparent,
+                            tertiary.copy(alpha = 0.0f),
+                            tertiary.copy(alpha = 0.9f),
+                            Color.White.copy(alpha = 0.7f),
+                            Color.Transparent,
+                        ),
+                        center = center,
                     ),
+                    radius = r * 1.16f,
                     center = center,
-                ),
-                radius = r * 1.16f,
-                center = center,
-                style = Stroke(width = 3f),
-                blendMode = BlendMode.Plus,
-            )
+                    style = Stroke(width = 3f),
+                    blendMode = BlendMode.Plus,
+                )
+            }
         }
 
         // Build the morph path once for this frame, scaled+centered.
@@ -197,7 +218,7 @@ fun BeatPulse(
         )
         val orb = reusablePath.asComposePath()
 
-        rotate(spin, pivot = center) {
+        rotate(spinDeg, pivot = center) {
             // 4) Liquid multi-hue surface.
             drawPath(
                 path = orb,

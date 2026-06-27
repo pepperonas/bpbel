@@ -1,16 +1,15 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package io.celox.bpbel.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -31,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -47,6 +47,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -66,18 +68,22 @@ fun BpmScreen(
     permissionPermanentlyDenied: Boolean,
     onRequestPermission: () -> Unit,
 ) {
+    // Phase cross-fade is a pure opacity change → Effects spec (highly
+    // damped, no overshoot), per the M3 motion token rules.
+    val effects = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val reduceMotion = rememberReduceMotion()
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        AnimatedBackdrop()
+        AnimatedBackdrop(reduceMotion)
         AnimatedContent(
             targetState = permissionGranted,
-            transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) },
+            transitionSpec = { fadeIn(effects) togetherWith fadeOut(effects) },
             label = "phase",
         ) { granted ->
             if (granted) {
-                ListeningContent(state)
+                ListeningContent(state, reduceMotion)
             } else {
                 PermissionContent(permissionPermanentlyDenied, onRequestPermission)
             }
@@ -86,7 +92,7 @@ fun BpmScreen(
 }
 
 @Composable
-private fun ListeningContent(state: AudioUiState) {
+private fun ListeningContent(state: AudioUiState, reduceMotion: Boolean) {
     val scheme = MaterialTheme.colorScheme
     Column(
         modifier = Modifier
@@ -112,11 +118,12 @@ private fun ListeningContent(state: AudioUiState) {
                 primary = scheme.primary,
                 secondary = scheme.secondary,
                 tertiary = scheme.tertiary,
+                reduceMotion = reduceMotion,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f),
             )
-            BpmReadout(bpm = state.bpm, beatTick = state.beatTick)
+            BpmReadout(bpm = state.bpm, beatTick = state.beatTick, reduceMotion = reduceMotion)
         }
 
         ConfidenceBar(confidence = state.confidence.toFloat())
@@ -152,30 +159,40 @@ private fun Header() {
 }
 
 @Composable
-private fun BpmReadout(bpm: Double, beatTick: Long) {
+private fun BpmReadout(bpm: Double, beatTick: Long, reduceMotion: Boolean) {
     val scheme = MaterialTheme.colorScheme
-    // Smooth count-up toward the target tempo (premium "settling").
+    val motion = MaterialTheme.motionScheme
+    // Count-up toward the target tempo. A settling *number* must not
+    // overshoot (an overshoot would momentarily display a wrong BPM), so
+    // it deliberately takes the highly-damped Effects timing rather than a
+    // bouncy Spatial spec — Effects is M3's no-overshoot settle character.
     val animated by animateFloatAsState(
         targetValue = bpm.toFloat(),
-        animationSpec = tween(550, easing = FastOutSlowInEasing),
+        animationSpec = motion.defaultEffectsSpec(),
         label = "bpmCount",
     )
     val shown = if (bpm <= 0.0) "—" else animated.roundToInt().toString()
 
-    // Gentle scale bounce of the whole readout on each beat.
+    // Per-beat scale bounce — a small element changing size → fast Spatial
+    // spec (lively overshoot is desired here). Suppressed under reduce-motion.
     val bounce = remember { Animatable(1f) }
+    val bounceSpec = motion.fastSpatialSpec<Float>()
     LaunchedEffect(beatTick) {
-        if (beatTick == 0L) return@LaunchedEffect
+        if (beatTick == 0L || reduceMotion) return@LaunchedEffect
         bounce.snapTo(1.07f)
-        bounce.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = Spring.StiffnessMedium))
+        bounce.animateTo(1f, bounceSpec)
     }
 
+    val label = if (bpm <= 0.0) "Kein Tempo erkannt" else "Tempo ${animated.roundToInt()} BPM"
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.graphicsLayer {
-            scaleX = bounce.value
-            scaleY = bounce.value
-        },
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = bounce.value
+                scaleY = bounce.value
+            }
+            // One spoken label for the whole readout instead of "120" + "BPM".
+            .semantics(mergeDescendants = true) { contentDescription = label },
     ) {
         // Bright white numeral with a neon glow — reads cleanly on the
         // orb's dark core, and the glow gives it premium depth.
@@ -299,11 +316,13 @@ private fun PermissionContent(
     }
 }
 
-/** Slow, breathing radial gradient behind everything. */
+/** Slow, breathing radial gradient behind everything. An infinite ambient
+ *  loop, so it legitimately stays duration-based (springs can't drive an
+ *  infinite animation). Frozen to a mid value under reduce-motion. */
 @Composable
-private fun AnimatedBackdrop() {
+private fun AnimatedBackdrop(reduceMotion: Boolean) {
     val infinite = rememberInfiniteTransition(label = "backdrop")
-    val t by infinite.animateFloat(
+    val tAnim by infinite.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -312,6 +331,7 @@ private fun AnimatedBackdrop() {
         ),
         label = "t",
     )
+    val t = if (reduceMotion) 0.5f else tAnim
     val scheme = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
