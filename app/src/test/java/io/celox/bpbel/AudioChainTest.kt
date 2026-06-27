@@ -99,6 +99,16 @@ class AudioChainTest {
     }
 
     @Test
+    fun locksOntoSlowSustainedBassWithoutSuppression() {
+        // A slow track (78 BPM) whose kick has a long sustained tail. The
+        // SuperFlux rising gate must still let each (widely spaced) attack
+        // through — i.e. it kills ghost re-triggers WITHOUT swallowing the
+        // real, legitimately slow beat.
+        val bpm = detect(synth(bpm = 78.0, seconds = 14.0, kickHz = 60.0))
+        assertTrue("expected ~78 BPM, got $bpm", bpm in 70.0..86.0)
+    }
+
+    @Test
     fun doesNotDoubleTempoOnABackbeatSnare() {
         // 100 BPM groove with a loud 200 Hz snare on 2 & 4. Must report
         // ~100, NOT ~200 (the classic snare-induced octave error).

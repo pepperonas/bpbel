@@ -191,6 +191,45 @@ class BpmAnalyzerTest {
     }
 
     @Test
+    fun superFluxGateDoesNotRetriggerOnASustainedNote() {
+        // A single long, *sustained* loud note (energy stays elevated for
+        // well over a second). Without the SuperFlux rising-edge gate the
+        // detector would re-fire every refractory period (~3 ghost onsets/s)
+        // and invent a bogus tempo. The gate must let only the ONE attack
+        // through, since the sustain never beats its own recent peak.
+        val a = BpmAnalyzer()
+        var t = 0.0
+        while (t < 3000) { a.push(chunk(0.02f), t); t += 10 }   // calibrate baseline
+        var fires = 0
+        while (t < 4800) {                                        // 1.8 s held note
+            a.push(chunk(0.5f), t)
+            if (a.estimate(t).beatJustFired) fires++
+            t += 10
+        }
+        assertEquals(1, fires)
+    }
+
+    @Test
+    fun loudnessGateBlocksOnsetsWhenClosed() {
+        // With the loudness gate shut (allow=false) even loud, perfectly
+        // periodic energy must produce no onsets — this is what stops a
+        // quiet room / mic hum from faking a BPM.
+        val a = BpmAnalyzer()
+        var t = 0.0
+        while (t < 3000) { a.push(chunk(0.02f), t, allow = true); t += 10 }
+        var fires = 0
+        val beats = setOf(3000.0, 3500.0, 4000.0, 4500.0, 5000.0)
+        t = 3000.0
+        while (t <= 5000) {
+            a.push(chunk(if (t in beats) 0.5f else 0.02f), t, allow = false)
+            if (a.estimate(t).beatJustFired) fires++
+            t += 10
+        }
+        assertEquals(0, fires)
+        assertEquals(0.0, a.estimate(5000.0).bpm, 0.0)
+    }
+
+    @Test
     fun configRangeIsSensible() {
         assertEquals(60.0, BpmConfig.BPM_MIN, 0.0)
         assertEquals(200.0, BpmConfig.BPM_MAX, 0.0)

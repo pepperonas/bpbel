@@ -14,7 +14,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-1.11-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Material 3 Expressive](https://img.shields.io/badge/Material%203-Expressive-FF6F61?logo=materialdesign&logoColor=white)](https://m3.material.io)
 [![AGP](https://img.shields.io/badge/AGP-8.13.1-02303A?logo=gradle&logoColor=white)](https://developer.android.com/build)
-[![Tests](https://img.shields.io/badge/unit%20tests-20%20passing-success?logo=junit5&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/unit%20tests-23%20passing-success?logo=junit5&logoColor=white)](#-testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Package](https://img.shields.io/badge/package-io.celox.bpbel-blueviolet)](#)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
@@ -64,7 +64,7 @@ Der Detektor ist ein **energie-basierter Onset-Detector mit IOI-Clustering** (In
 der klassische, praxiserprobte Ansatz für 4/4-Musik mit klarem Kick (typische Genauigkeit 85–95 %).
 Die Kernlogik ([`BpmAnalyzer.kt`](app/src/main/java/io/celox/bpbel/audio/BpmAnalyzer.kt)) ist ein
 1:1-Port eines kampferprobten TypeScript-Detektors und wird durch eine **portierte Test-Suite** plus
-End-to-End-DSP-Tests (20 Tests) gegen das Original abgesichert.
+End-to-End-DSP-Tests (23 Tests) gegen das Original abgesichert.
 
 ```
 Mikrofon (AudioRecord, 44.1 kHz mono PCM-16)
@@ -75,11 +75,23 @@ Mikrofon (AudioRecord, 44.1 kHz mono PCM-16)
             │
             ├─▶ RMS-Energie pro 1024-Sample-Frame
             ├─▶ gleitender Mittelwert (Baseline-Gate)
-            ├─▶ Onset, wenn Energie > Schwelle · Mittelwert  (+ Refraktärzeit)
+            ├─▶ Onset, wenn  Energie > Schwelle · Mittelwert
+            │        UND  steigende Flanke (SuperFlux: Energie schlägt ihren
+            │             eigenen jüngsten Peak → echter neuer Anschlag, kein
+            │             erneutes Triggern auf gehaltenem Bass)
+            │        UND  Lautstärke-Gate offen (echte Musik, keine Stille)
+            │        UND  Refraktärzeit verstrichen
             ├─▶ Onsets → IOIs → Median → 60000 / Median = BPM
             ├─▶ Oktav-Korrektur (60–200 BPM) + Oktav-Snap (kein 120↔240-Flackern)
             └─▶ 4-s-Fenster-Mittel = stabiler Anzeigewert  (+ Stale-Reset bei Stille)
 ```
+
+Die **SuperFlux-Flankenerkennung** (Böck & Widmer 2013) und das **Lautstärke-Gate**
+sind direkt aus dem produktiven Detektor des [disco-controllers](https://github.com/pepperonas/disco-controller)
+übernommen, der auf demselben `BpmAnalyzer` aufsetzt: Ersteres unterdrückt den
+Geister-Beat *direkt nach* einem echten Bass auf langsamen, gehaltenen Tracks;
+Letzteres verhindert, dass sich die BPM in einem leisen Raum auf Mikrofon-Rauschen
+einrastet.
 
 **Konfidenz** entsteht aus der IOI-Konsistenz (`1 − stddev/median`): ein gleichmäßiger
 Viertel-Puls liefert ~0,9, Sprache/Rauschen ~0,1.
@@ -136,7 +148,11 @@ Verhalten des Referenz-Algorithmus exakt reproduziert.
 
 [`AudioChainTest`](app/src/test/java/io/celox/bpbel/AudioChainTest.kt) treibt die **echte**
 `KickBandpass` → `BpmAnalyzer`-Kette mit realistischem Frame-Timing und prüft u. a., dass ein
-Backbeat-Snare das Tempo **nicht verdoppelt**.
+Backbeat-Snare das Tempo **nicht verdoppelt** und ein langsamer, gehaltener Bass weiterhin
+sauber lockt (die SuperFlux-Flanke unterdrückt Geister-Beats, ohne echte langsame Beats zu
+schlucken). Auf Analyzer-Ebene sichern zwei Tests die neuen Gates ab: ein **gehaltener Ton
+feuert genau einen** Onset (kein Re-Trigger) und ein **geschlossenes Lautstärke-Gate
+unterdrückt** selbst laute, periodische Energie komplett.
 
 ---
 

@@ -22,8 +22,10 @@ import kotlin.math.sqrt
  *     class assumes pre-filtered samples.
  *  2. Per chunk, compute RMS energy.
  *  3. Maintain a sliding-window moving average of energy.
- *  4. Onset = chunk-energy exceeds moving-average × threshold AND
- *     enough time has passed since the last onset (refractory period).
+ *  4. Onset = chunk-energy exceeds moving-average × threshold AND it is a
+ *     rising edge (SuperFlux: energy beats its recent *lagged* peak, so a
+ *     sustained bass note can't re-trigger) AND the loudness gate is open
+ *     (genuine music, not silence) AND the refractory period has elapsed.
  *  5. Record onset timestamps in a sliding window.
  *  6. Inter-onset intervals → median → BPM = 60000 / median_ms.
  *  7. Octave-correction: fold into [60, 200] BPM by doubling / halving.
@@ -81,6 +83,26 @@ object BpmConfig {
     /** Rolling window over which raw estimates are mean-averaged for
      *  the displayed value. */
     const val DISPLAY_AVG_WINDOW_MS = 4000.0
+
+    // --- SuperFlux-style onset gate (Böck & Widmer 2013, "Maximum Filter
+    // Vibrato Suppression") --------------------------------------------------
+    // An onset may fire only when the band energy exceeds its *lagged* peak
+    // by [SF_MARGIN] — i.e. a genuinely NEW attack — not while it merely
+    // stays above the moving-average threshold (sustain/decay). This is what
+    // kills the spurious second beat right after a real bass note on slow,
+    // sustained tracks. Ported from the disco-controller's production
+    // detector, which added it on top of this same shared analyzer.
+
+    /** Frames to skip back so the reference window sits *before* this
+     *  attack's own energy smear (≈ one filter/frame tail). */
+    const val SF_LAG = 4
+
+    /** Frames of lagged history the reference peak is taken from. */
+    const val SF_WIN = 4
+
+    /** Current energy must beat the lagged reference peak by this factor
+     *  to count as a new attack (vs. mere sustain). */
+    const val SF_MARGIN = 1.04
 }
 
 private data class EnergyChunk(val time: Double, val energy: Double)
@@ -89,6 +111,9 @@ private data class RawBpm(val time: Double, val bpm: Double)
 class BpmAnalyzer {
     private val onsets = ArrayDeque<Double>()
     private val energyHistory = ArrayDeque<EnergyChunk>()
+    /** Recent per-frame energies for the SuperFlux reference peak. Holds the
+     *  last [BpmConfig.SF_LAG] + [BpmConfig.SF_WIN] frames. */
+    private val energyRing = ArrayDeque<Double>()
     private var lastOnset = Double.NEGATIVE_INFINITY
     private val rawBpmHistory = ArrayDeque<RawBpm>()
     private var displayBpm = 0.0
@@ -101,8 +126,12 @@ class BpmAnalyzer {
 
     /** Feed one chunk of (band-pass-filtered) audio samples.
      *  `samples` are float in [-1, 1]; `nowMs` is monotonically
-     *  increasing milliseconds. */
-    fun push(samples: FloatArray, nowMs: Double) {
+     *  increasing milliseconds.
+     *
+     *  `allow` is the loudness gate: when false (signal at/below the dB
+     *  floor → effectively silence) the baseline still updates but no
+     *  onset is registered, so the BPM never locks onto room noise. */
+    fun push(samples: FloatArray, nowMs: Double, allow: Boolean = true) {
         justFiredBeat = false
         if (firstPushAt.isNaN()) firstPushAt = nowMs
 
@@ -112,6 +141,23 @@ class BpmAnalyzer {
             nowMs - energyHistory.first().time > BpmConfig.AVG_WINDOW_MS
         ) {
             energyHistory.removeFirst()
+        }
+
+        // SuperFlux reference peak: the max of a *lagged* window — the
+        // SF_WIN oldest frames currently buffered, i.e. from before this
+        // attack's own energy smear. Computed before appending the current
+        // frame, and updated every frame even while the baseline gate below
+        // is still shut, so the reference is warm the moment onsets open up.
+        val ref = if (energyRing.size >= BpmConfig.SF_LAG + BpmConfig.SF_WIN) {
+            var m = 0.0
+            for (i in 0 until BpmConfig.SF_WIN) if (energyRing[i] > m) m = energyRing[i]
+            m
+        } else {
+            0.0
+        }
+        energyRing.addLast(energy)
+        while (energyRing.size > BpmConfig.SF_LAG + BpmConfig.SF_WIN) {
+            energyRing.removeFirst()
         }
 
         // Baseline-calibration gate: wait until ~AVG_WINDOW_MS of audio
@@ -134,7 +180,16 @@ class BpmAnalyzer {
 
         val avg = energyHistory.sumOf { it.energy } / energyHistory.size
 
-        val triggered = energy > avg * BpmConfig.ONSET_THRESHOLD &&
+        // Three conditions for an onset, all required:
+        //  • loudness gate open (genuine music, not silence),
+        //  • energy exceeds the moving-average baseline by the threshold,
+        //  • SuperFlux rising edge: energy beats the recent *lagged* peak
+        //    (a new attack, not the sustain/decay of the previous one),
+        //  • refractory period since the last onset has elapsed.
+        val rising = energy > ref * BpmConfig.SF_MARGIN
+        val triggered = allow &&
+            energy > avg * BpmConfig.ONSET_THRESHOLD &&
+            rising &&
             nowMs - lastOnset >= BpmConfig.ONSET_REFRACTORY_MS
 
         if (triggered) {
@@ -230,6 +285,7 @@ class BpmAnalyzer {
     fun reset() {
         onsets.clear()
         energyHistory.clear()
+        energyRing.clear()
         lastOnset = Double.NEGATIVE_INFINITY
         rawBpmHistory.clear()
         displayBpm = 0.0

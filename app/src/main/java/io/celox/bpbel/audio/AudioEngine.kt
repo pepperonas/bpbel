@@ -47,6 +47,10 @@ data class AudioUiState(
  *     → full-band RMS → dBFS                (loudness meter)
  *     → KickBandpass (30-100 Hz, exact inspector-rust graph) → BpmAnalyzer
  *
+ * The smoothed dBFS also drives a **loudness gate**: onsets are only
+ * registered while the room is genuinely loud (above [LOUD_DB]), so a
+ * quiet room / mic hum never makes the BPM lock onto noise.
+ *
  * Results are published on [state] (a [StateFlow]) at frame rate
  * (~43 frames/s with a 1024-sample frame), which Compose collects.
  */
@@ -126,9 +130,12 @@ class AudioEngine {
                 // the readable numeric dB; the bar meter still uses `dbfs`.
                 smoothedDb += (dbfs - smoothedDb) * 0.08
 
-                // Band-pass for the kick, then onset/tempo analysis.
+                // Band-pass for the kick, then onset/tempo analysis. The
+                // loudness gate (smoothed dBFS above LOUD_DB) keeps the BPM
+                // from locking onto room noise when no music is playing.
                 val now = SystemClock.elapsedRealtime().toDouble()
-                analyzer.push(bandpass.process(frame), now)
+                val loud = smoothedDb > LOUD_DB
+                analyzer.push(bandpass.process(frame), now, allow = loud)
                 val est = analyzer.estimate(now)
                 if (est.beatJustFired) beatTick++
 
@@ -186,5 +193,13 @@ class AudioEngine {
     companion object {
         const val SAMPLE_RATE = 44_100
         const val FRAME = 1024
+
+        /** Loudness gate for onset detection (dBFS). Onsets only register
+         *  while the smoothed level is above this — i.e. the room is
+         *  genuinely loud (music). Set ~8 dB above a typical quiet-room
+         *  noise floor (≈ -60 dBFS on an UNPROCESSED phone mic) so quiet
+         *  music still registers while silence / hum can't fake a BPM.
+         *  Mirrors the disco-controller's `LOUD_DB`. */
+        const val LOUD_DB = -52.0
     }
 }
