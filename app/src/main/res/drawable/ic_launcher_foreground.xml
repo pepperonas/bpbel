@@ -3,22 +3,32 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Centered audio-bars / heartbeat motif within the 72dp safe zone. -->
-    <group android:translateX="0" android:translateY="0">
-        <path
-            android:fillColor="#D0BCFF"
-            android:pathData="M40,46 h6 v16 h-6 z" />
-        <path
-            android:fillColor="#B69DF8"
-            android:pathData="M50,38 h6 v32 h-6 z" />
-        <path
-            android:fillColor="#EFB8C8"
-            android:pathData="M60,30 h6 v48 h-6 z" />
-        <path
-            android:fillColor="#B69DF8"
-            android:pathData="M70,38 h6 v32 h-6 z" />
-        <path
-            android:fillColor="#D0BCFF"
-            android:pathData="M80,46 h6 v16 h-6 z" />
-    </group>
+    <!--
+      Audio-spectrum / heartbeat motif: 5 pill bars, symmetric and tallest
+      in the middle. Geometrically centered on the icon center (54,54):
+      bar centers at x = 34,44,54,64,74 → the block spans x 31..77 (mid 54),
+      and every bar is symmetric about y=54. Each bar is a vertical capsule
+      (width 6, radius 3). Colours follow the in-app orb gradient
+      (cyan → violet → magenta → violet → cyan).
+    -->
+    <!-- outer-left (cyan) -->
+    <path
+        android:fillColor="#9BF6FF"
+        android:pathData="M31,47 A3,3 0 0 1 37,47 L37,61 A3,3 0 0 1 31,61 Z" />
+    <!-- inner-left (violet) -->
+    <path
+        android:fillColor="#D0BCFF"
+        android:pathData="M41,40 A3,3 0 0 1 47,40 L47,68 A3,3 0 0 1 41,68 Z" />
+    <!-- center (magenta, tallest) -->
+    <path
+        android:fillColor="#FFB1E8"
+        android:pathData="M51,33 A3,3 0 0 1 57,33 L57,75 A3,3 0 0 1 51,75 Z" />
+    <!-- inner-right (violet) -->
+    <path
+        android:fillColor="#D0BCFF"
+        android:pathData="M61,40 A3,3 0 0 1 67,40 L67,68 A3,3 0 0 1 61,68 Z" />
+    <!-- outer-right (cyan) -->
+    <path
+        android:fillColor="#9BF6FF"
+        android:pathData="M71,47 A3,3 0 0 1 77,47 L77,61 A3,3 0 0 1 71,61 Z" />
 </vector>
