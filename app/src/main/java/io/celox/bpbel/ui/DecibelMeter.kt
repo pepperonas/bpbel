@@ -9,7 +9,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -17,20 +19,25 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.max
 
 /**
  * Horizontal segmented loudness meter (dBFS).
  *
  * The live level is held in a plain mutable float and **manually lerped**
- * each frame rather than routed through `animateFloatAsState` — the raw
- * audio signal updates ~43×/s and an animation spec would lag it. We
- * smooth asymmetrically: fast attack (follow transients up) + slow
+ * on every display frame rather than routed through `animateFloatAsState`
+ * — the raw audio signal updates ~43×/s and an animation spec would lag
+ * it. We smooth asymmetrically: fast attack (follow transients up) + slow
  * release (graceful decay), the classic VU-meter feel. A separate
  * peak-hold tick falls back slowly.
  *
+ * The loop runs on `withFrameNanos` with **time-based** coefficients, so
+ * the decay always plays out — even when the incoming level pins to a
+ * constant (e.g. exactly 0 in a quiet room), which would stall a
+ * smoothing step keyed on level *changes*.
+ *
  * @param level 0..1 loudness fraction (see [io.celox.bpbel.audio.AudioUiState.loudnessFraction]).
- * @param dbfsLabel formatted dB text shown at the end.
  */
 @Composable
 fun DecibelMeter(
@@ -43,17 +50,35 @@ fun DecibelMeter(
 ) {
     var shown by remember { mutableFloatStateOf(0f) }
     var peak by remember { mutableFloatStateOf(0f) }
+    val target by rememberUpdatedState(level)
 
-    // Drive the smoothing off the incoming level. Re-launches whenever
-    // `level` changes (i.e. every audio frame), advancing one smoothing
-    // step toward the target.
-    LaunchedEffect(level) {
-        val target = level
-        // Asymmetric one-pole smoothing.
-        val attack = 0.55f
-        val release = 0.12f
-        shown += (target - shown) * if (target > shown) attack else release
-        peak = if (target >= peak) target else max(target, peak - 0.012f)
+    LaunchedEffect(Unit) {
+        // Per-second one-pole rates matching the previous per-emission
+        // constants at 43 fps (attack 0.55/frame ≈ 34/s, release
+        // 0.12/frame ≈ 5.5/s, peak fall 0.012/frame ≈ 0.5/s).
+        val attackPerS = 34f
+        val releasePerS = 5.5f
+        val peakFallPerS = 0.5f
+        var lastNanos = 0L
+        while (true) {
+            withFrameNanos { now ->
+                val dt = if (lastNanos == 0L) {
+                    1f / 60f
+                } else {
+                    ((now - lastNanos) / 1e9f).coerceIn(0f, 0.1f)
+                }
+                lastNanos = now
+                val t = target
+                val rate = if (t > shown) attackPerS else releasePerS
+                val k = 1f - exp(-rate * dt)
+                val newShown = shown + (t - shown) * k
+                val newPeak = if (t >= peak) t else max(t, peak - peakFallPerS * dt)
+                // Only write when visibly different, so a fully-settled
+                // meter stops invalidating the canvas every frame.
+                if (abs(newShown - shown) > 1e-4f) shown = newShown
+                if (abs(newPeak - peak) > 1e-4f) peak = newPeak
+            }
+        }
     }
 
     Box(modifier = modifier.fillMaxWidth().height(34.dp)) {

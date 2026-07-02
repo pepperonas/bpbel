@@ -130,12 +130,15 @@ class BpmAnalyzer {
      *
      *  `allow` is the loudness gate: when false (signal at/below the dB
      *  floor → effectively silence) the baseline still updates but no
-     *  onset is registered, so the BPM never locks onto room noise. */
-    fun push(samples: FloatArray, nowMs: Double, allow: Boolean = true) {
+     *  onset is registered, so the BPM never locks onto room noise.
+     *
+     *  `length` limits analysis to the first N samples — lets the capture
+     *  loop reuse one fixed buffer for short reads instead of copying. */
+    fun push(samples: FloatArray, nowMs: Double, allow: Boolean = true, length: Int = samples.size) {
         justFiredBeat = false
         if (firstPushAt.isNaN()) firstPushAt = nowMs
 
-        val energy = rms(samples)
+        val energy = rms(samples, length)
         energyHistory.addLast(EnergyChunk(nowMs, energy))
         while (energyHistory.isNotEmpty() &&
             nowMs - energyHistory.first().time > BpmConfig.AVG_WINDOW_MS
@@ -298,8 +301,11 @@ class BpmAnalyzer {
     fun currentEnergy(): Double = energyHistory.lastOrNull()?.energy ?: 0.0
 }
 
-private fun rms(samples: FloatArray): Double {
+private fun rms(samples: FloatArray, length: Int): Double {
     var sum = 0.0
-    for (s in samples) sum += s.toDouble() * s.toDouble()
-    return sqrt(sum / samples.size)
+    for (i in 0 until length) {
+        val s = samples[i].toDouble()
+        sum += s * s
+    }
+    return sqrt(sum / length)
 }

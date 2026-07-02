@@ -88,6 +88,7 @@ fun BeatPulse(
         Morph(circle, star)
     }
     val reusablePath = remember { android.graphics.Path() }
+    val reusableMatrix = remember { android.graphics.Matrix() }
 
     // Beat punch (scale overshoot) + rim/morph flare. Both suppressed under
     // reduce-motion (the orb then reflects level/confidence statically).
@@ -211,11 +212,11 @@ fun BeatPulse(
         // Build the morph path once for this frame, scaled+centered.
         val progress = (0.05f + flare.value * 0.55f).coerceIn(0f, 1f)
         morph.toPath(progress, reusablePath)
-        reusablePath.transform(
-            android.graphics.Matrix().apply {
-                setScale(r, r); postTranslate(cx, cy)
-            },
-        )
+        // setScale overwrites the whole matrix, so the remembered instance
+        // needs no reset between frames.
+        reusableMatrix.setScale(r, r)
+        reusableMatrix.postTranslate(cx, cy)
+        reusablePath.transform(reusableMatrix)
         val orb = reusablePath.asComposePath()
 
         rotate(spinDeg, pivot = center) {

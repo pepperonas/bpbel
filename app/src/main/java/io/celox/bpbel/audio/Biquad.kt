@@ -87,13 +87,23 @@ class KickBandpass(sampleRate: Int) {
     private val hp = Biquad.highpass(sampleRate, 30.0, qFromDb(0.7))
     private val lp = Biquad.lowpass(sampleRate, 100.0, qFromDb(1.5))
 
-    /** Filter a block in place into a fresh array. */
+    /** Filter a block into a fresh array. */
     fun process(input: FloatArray): FloatArray {
         val out = FloatArray(input.size)
         for (i in input.indices) {
             out[i] = lp.process(hp.process(input[i].toDouble())).toFloat()
         }
         return out
+    }
+
+    /** Filter the first [length] samples of [buf] in place — the
+     *  allocation-free variant for the real-time capture loop (which runs
+     *  ~43×/s and would otherwise churn a 4 KB array per frame). Safe
+     *  because the filter is purely sample-sequential. */
+    fun processInPlace(buf: FloatArray, length: Int = buf.size) {
+        for (i in 0 until length) {
+            buf[i] = lp.process(hp.process(buf[i].toDouble())).toFloat()
+        }
     }
 
     fun reset() {

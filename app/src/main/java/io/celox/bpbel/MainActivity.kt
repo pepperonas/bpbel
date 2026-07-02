@@ -42,13 +42,11 @@ class MainActivity : ComponentActivity() {
 
                 val state by engine.state.collectAsStateWithLifecycle()
 
-                var granted by remember {
-                    mutableStateOf(
-                        ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.RECORD_AUDIO,
-                        ) == PackageManager.PERMISSION_GRANTED,
-                    )
-                }
+                fun hasMicPermission() = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.RECORD_AUDIO,
+                ) == PackageManager.PERMISSION_GRANTED
+
+                var granted by remember { mutableStateOf(hasMicPermission()) }
                 var permanentlyDenied by remember { mutableStateOf(false) }
 
                 val launcher = rememberLauncherForActivityResult(
@@ -67,8 +65,19 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(lifecycleOwner, granted) {
                     val observer = LifecycleEventObserver { _, event ->
                         when (event) {
-                            Lifecycle.Event.ON_START ->
-                                if (granted) engine.start()
+                            Lifecycle.Event.ON_START -> {
+                                // Re-check on every return to the foreground:
+                                // the user may have granted (or revoked) the
+                                // mic permission in the system settings, and
+                                // the launcher callback never sees that.
+                                val now = hasMicPermission()
+                                if (now != granted) {
+                                    if (now) permanentlyDenied = false
+                                    granted = now // re-keys this effect
+                                } else if (granted) {
+                                    engine.start()
+                                }
+                            }
                             Lifecycle.Event.ON_STOP -> engine.stop()
                             else -> Unit
                         }

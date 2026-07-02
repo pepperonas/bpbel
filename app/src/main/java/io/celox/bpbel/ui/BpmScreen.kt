@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
@@ -97,6 +98,9 @@ private fun ListeningContent(state: AudioUiState, reduceMotion: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Edge-to-edge is enabled, so keep the header out of the status
+            // bar / camera cutout and the card clear of the gesture bar.
+            .safeDrawingPadding()
             .padding(horizontal = 24.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -287,6 +291,7 @@ private fun PermissionContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .safeDrawingPadding()
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,

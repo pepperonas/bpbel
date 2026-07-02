@@ -10,6 +10,7 @@ import androidx.annotation.RequiresPermission
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.log10
 
@@ -59,30 +60,53 @@ class AudioEngine {
     private val _state = MutableStateFlow(AudioUiState())
     val state: StateFlow<AudioUiState> = _state.asStateFlow()
 
-    @Volatile
-    private var running = false
-    private var worker: Thread? = null
+    /** One capture session. The worker owns all mutable analysis state;
+     *  the main thread only flips [active] — so there is no shared state
+     *  to race on and no need to block on [Thread.join]. */
+    private class Session {
+        /** True while this session is the engine's current one. Cleared by
+         *  stop() (main thread) or by the worker itself on fatal error —
+         *  whoever wins the CAS also publishes the idle state. */
+        val active = AtomicBoolean(true)
+    }
 
-    private val analyzer = BpmAnalyzer()
+    // Main-thread only.
+    private var session: Session? = null
+
+    /** Serialises state publication against session hand-over, so a worker
+     *  that is being stopped can never publish a stale "listening" frame
+     *  *after* stop() has already published the idle state. Uncontended in
+     *  the steady state — negligible at ~43 acquisitions/s. */
+    private val publishLock = Any()
 
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
-        if (running) return
-        running = true
-        worker = thread(name = "bpbel-audio", isDaemon = true) { captureLoop() }
+        if (session?.active?.get() == true) return
+        val s = Session()
+        session = s
+        thread(name = "bpbel-audio", isDaemon = true) { captureLoop(s) }
     }
 
+    /** Signal the worker to wind down; never blocks. The worker releases
+     *  the AudioRecord on its own thread. */
     fun stop() {
-        running = false
-        worker?.join(500)
-        worker = null
-        analyzer.reset()
-        _state.value = AudioUiState() // back to idle
+        synchronized(publishLock) {
+            session?.active?.set(false)
+            session = null
+            _state.value = AudioUiState() // back to idle
+        }
+    }
+
+    /** Publish [value] only while [s] is still the live session. */
+    private fun publish(s: Session, value: AudioUiState) {
+        synchronized(publishLock) {
+            if (s.active.get()) _state.value = value
+        }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    private fun captureLoop() {
+    private fun captureLoop(session: Session) {
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -93,10 +117,11 @@ class AudioEngine {
 
         val record = openRecord(bufferBytes)
         if (record == null) {
-            running = false
+            session.active.set(false)
             return
         }
 
+        val analyzer = BpmAnalyzer()
         val bandpass = KickBandpass(SAMPLE_RATE)
         val pcm = ShortArray(FRAME)
         val floats = FloatArray(FRAME)
@@ -105,11 +130,16 @@ class AudioEngine {
 
         try {
             record.startRecording()
-            _state.value = _state.value.copy(listening = true)
+            publish(session, _state.value.copy(listening = true))
 
-            while (running) {
+            while (session.active.get()) {
                 val read = record.read(pcm, 0, FRAME)
-                if (read <= 0) continue
+                if (read == 0) continue
+                // Negative = unrecoverable error (e.g. ERROR_DEAD_OBJECT
+                // when another app grabs the mic, or the privacy toggle
+                // cuts it). Bail out instead of spinning at 100 % CPU;
+                // the finally block publishes the idle state.
+                if (read < 0) break
 
                 // PCM-16 → float [-1, 1] and full-band RMS in one pass.
                 var sumSq = 0.0
@@ -118,7 +148,6 @@ class AudioEngine {
                     floats[i] = v
                     sumSq += v.toDouble() * v
                 }
-                val frame = if (read == FRAME) floats else floats.copyOf(read)
 
                 val rms = Math.sqrt(sumSq / read)
                 val dbfs = if (rms > 0) {
@@ -130,33 +159,47 @@ class AudioEngine {
                 // the readable numeric dB; the bar meter still uses `dbfs`.
                 smoothedDb += (dbfs - smoothedDb) * 0.08
 
-                // Band-pass for the kick, then onset/tempo analysis. The
+                // Band-pass for the kick (in place — `floats` is not read
+                // again this frame), then onset/tempo analysis. The
                 // loudness gate (smoothed dBFS above LOUD_DB) keeps the BPM
                 // from locking onto room noise when no music is playing.
                 val now = SystemClock.elapsedRealtime().toDouble()
                 val loud = smoothedDb > LOUD_DB
-                analyzer.push(bandpass.process(frame), now, allow = loud)
+                bandpass.processInPlace(floats, read)
+                analyzer.push(floats, now, allow = loud, length = read)
                 val est = analyzer.estimate(now)
                 if (est.beatJustFired) beatTick++
 
-                _state.value = AudioUiState(
-                    bpm = est.bpm,
-                    confidence = est.confidence,
-                    beatTick = beatTick,
-                    dbfs = dbfs,
-                    displayDbfs = smoothedDb,
-                    energy = analyzer.currentEnergy(),
-                    listening = true,
+                publish(
+                    session,
+                    AudioUiState(
+                        bpm = est.bpm,
+                        confidence = est.confidence,
+                        beatTick = beatTick,
+                        dbfs = dbfs,
+                        displayDbfs = smoothedDb,
+                        energy = analyzer.currentEnergy(),
+                        listening = true,
+                    ),
                 )
             }
         } catch (_: Throwable) {
-            // Swallow — stop() / teardown handles cleanup; UI shows idle.
+            // Swallow — the finally block below resets the UI to idle.
         } finally {
             try {
                 record.stop()
             } catch (_: Throwable) {
             }
             record.release()
+            // If the loop died on its own (mic lost, capture error) rather
+            // than via stop(), win the deactivation and publish idle so the
+            // UI never sits on a frozen "LIVE" state — and a later start()
+            // isn't blocked by a session that looks alive.
+            synchronized(publishLock) {
+                if (session.active.compareAndSet(true, false)) {
+                    _state.value = AudioUiState()
+                }
+            }
         }
     }
 
