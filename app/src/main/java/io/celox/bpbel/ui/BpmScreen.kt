@@ -37,17 +37,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -61,10 +66,18 @@ import kotlin.math.roundToInt
  * Single-screen UI. Two states:
  *  - **permission needed** → an invitation card with a request button.
  *  - **listening** → the live BPM + dB visualizer.
+ *
+ * Takes the audio state as [State] (not as a value): the flow emits
+ * ~43×/s, and reading the object here would recompose the whole screen
+ * on every audio frame. Instead the continuous values (loudness, level,
+ * confidence) are read lazily in the children's *draw* lambdas, and the
+ * few composition-affecting values (beat tick, display texts) are
+ * derived+quantised so composition only runs when something visible
+ * actually changes (~beat/second rate).
  */
 @Composable
 fun BpmScreen(
-    state: AudioUiState,
+    state: State<AudioUiState>,
     permissionGranted: Boolean,
     permissionPermanentlyDenied: Boolean,
     onRequestPermission: () -> Unit,
@@ -93,8 +106,25 @@ fun BpmScreen(
 }
 
 @Composable
-private fun ListeningContent(state: AudioUiState, reduceMotion: Boolean) {
+private fun ListeningContent(state: State<AudioUiState>, reduceMotion: Boolean) {
     val scheme = MaterialTheme.colorScheme
+
+    // Composition-affecting reads, quantised: beatTick changes per beat
+    // (~2/s), the BPM count-up target only per 0.1 BPM — everything else
+    // in this tree reads the state lazily in the draw phase.
+    val beatTick by remember { derivedStateOf { state.value.beatTick } }
+    val bpm by remember {
+        derivedStateOf { (state.value.bpm * 10).roundToInt() / 10.0 }
+    }
+
+    // Measurement tool: keep the display awake while actively listening.
+    // View.keepScreenOn scopes itself to this composable's lifetime.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -116,9 +146,9 @@ private fun ListeningContent(state: AudioUiState, reduceMotion: Boolean) {
             contentAlignment = Alignment.Center,
         ) {
             BeatPulse(
-                beatTick = state.beatTick,
-                confidence = state.confidence.toFloat(),
-                loudness = state.loudnessFraction,
+                beatTick = beatTick,
+                confidence = { state.value.confidence.toFloat() },
+                loudness = { state.value.loudnessFraction },
                 primary = scheme.primary,
                 secondary = scheme.secondary,
                 tertiary = scheme.tertiary,
@@ -127,10 +157,10 @@ private fun ListeningContent(state: AudioUiState, reduceMotion: Boolean) {
                     .fillMaxWidth()
                     .aspectRatio(1f),
             )
-            BpmReadout(bpm = state.bpm, beatTick = state.beatTick, reduceMotion = reduceMotion)
+            BpmReadout(bpm = bpm, beatTick = beatTick, reduceMotion = reduceMotion)
         }
 
-        ConfidenceBar(confidence = state.confidence.toFloat())
+        ConfidenceBar(state)
 
         Spacer(Modifier.height(28.dp))
 
@@ -221,13 +251,18 @@ private fun BpmReadout(bpm: Double, beatTick: Long, reduceMotion: Boolean) {
 }
 
 @Composable
-private fun ConfidenceBar(confidence: Float) {
+private fun ConfidenceBar(state: State<AudioUiState>) {
+    // The bar itself reads in the draw phase (progress lambda); only the
+    // rounded percent text touches composition, at ~1 %-step granularity.
+    val percent by remember {
+        derivedStateOf { (state.value.confidence * 100).roundToInt() }
+    }
     Column(
         modifier = Modifier.fillMaxWidth(0.6f),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LinearProgressIndicator(
-            progress = { confidence },
+            progress = { state.value.confidence.toFloat() },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(6.dp)
@@ -237,7 +272,7 @@ private fun ConfidenceBar(confidence: Float) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Konfidenz ${(confidence * 100).roundToInt()}%",
+            text = "Konfidenz $percent%",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Medium,
@@ -246,8 +281,13 @@ private fun ConfidenceBar(confidence: Float) {
 }
 
 @Composable
-private fun LoudnessSection(state: AudioUiState) {
+private fun LoudnessSection(state: State<AudioUiState>) {
     val scheme = MaterialTheme.colorScheme
+    // The numeric readout is heavily smoothed and displayed as a whole
+    // dB — the derived string changes ~1×/s, not 43×/s.
+    val dbText by remember {
+        derivedStateOf { formatDbfs(state.value.displayDbfs, AudioUiState.DB_FLOOR) }
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = scheme.surface),
@@ -265,7 +305,7 @@ private fun LoudnessSection(state: AudioUiState) {
                     color = scheme.onSurface,
                 )
                 Text(
-                    text = formatDbfs(state.displayDbfs, AudioUiState.DB_FLOOR),
+                    text = dbText,
                     style = MaterialTheme.typography.titleMedium,
                     color = scheme.tertiary,
                     fontWeight = FontWeight.Bold,
@@ -273,7 +313,7 @@ private fun LoudnessSection(state: AudioUiState) {
             }
             Spacer(Modifier.height(14.dp))
             DecibelMeter(
-                level = state.loudnessFraction,
+                level = { state.value.loudnessFraction },
                 primary = scheme.primary,
                 secondary = scheme.secondary,
                 tertiary = scheme.tertiary,
@@ -323,11 +363,14 @@ private fun PermissionContent(
 
 /** Slow, breathing radial gradient behind everything. An infinite ambient
  *  loop, so it legitimately stays duration-based (springs can't drive an
- *  infinite animation). Frozen to a mid value under reduce-motion. */
+ *  infinite animation). Frozen to a mid value under reduce-motion.
+ *
+ *  The animated value is read inside [drawBehind], so each animation
+ *  frame only re-draws — this composable composes exactly once. */
 @Composable
 private fun AnimatedBackdrop(reduceMotion: Boolean) {
     val infinite = rememberInfiniteTransition(label = "backdrop")
-    val tAnim by infinite.animateFloat(
+    val tAnim = infinite.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -336,18 +379,20 @@ private fun AnimatedBackdrop(reduceMotion: Boolean) {
         ),
         label = "t",
     )
-    val t = if (reduceMotion) 0.5f else tAnim
-    val scheme = MaterialTheme.colorScheme
+    val primary = MaterialTheme.colorScheme.primary
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        scheme.primary.copy(alpha = 0.10f + t * 0.06f),
-                        Color.Transparent,
+            .drawBehind {
+                val t = if (reduceMotion) 0.5f else tAnim.value
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            primary.copy(alpha = 0.10f + t * 0.06f),
+                            Color.Transparent,
+                        ),
                     ),
-                ),
-            ),
+                )
+            },
     )
 }

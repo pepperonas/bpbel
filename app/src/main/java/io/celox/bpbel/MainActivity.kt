@@ -40,7 +40,10 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
                 val activity = this
 
-                val state by engine.state.collectAsStateWithLifecycle()
+                // Kept as State (no `by` read here): the flow emits ~43×/s
+                // and BpmScreen defers the reads, so this composition
+                // doesn't re-run per audio frame.
+                val state = engine.state.collectAsStateWithLifecycle()
 
                 fun hasMicPermission() = ContextCompat.checkSelfPermission(
                     context, Manifest.permission.RECORD_AUDIO,

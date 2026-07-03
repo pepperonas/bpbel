@@ -15,7 +15,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,8 +59,11 @@ private const val RIPPLE_POOL = 6
 @Composable
 fun BeatPulse(
     beatTick: Long,
-    confidence: Float,
-    loudness: Float,
+    /** 0..1 — read lazily inside the draw phase, so the ~43 Hz audio
+     *  updates invalidate only the canvas, never this composition. */
+    confidence: () -> Float,
+    /** 0..1 loudness fraction — draw-phase read, same reasoning. */
+    loudness: () -> Float,
     primary: Color,
     secondary: Color,
     tertiary: Color,
@@ -121,44 +123,74 @@ fun BeatPulse(
         }
     }
 
-    // Continuous ambient motion.
+    // Continuous ambient motion. Kept as State<Float> (no `by` delegate):
+    // the values are read *inside* the Canvas draw lambda, so each 60 fps
+    // animation frame invalidates only the draw phase — this composable
+    // never recomposes for ambient motion.
     val infinite = rememberInfiniteTransition(label = "ambient")
-    val spin by infinite.animateFloat(
+    val spin = infinite.animateFloat(
         0f, 360f,
         infiniteRepeatable(tween(26_000, easing = LinearEasing), RepeatMode.Restart),
         label = "spin",
     )
-    val arcSpin by infinite.animateFloat(
+    val arcSpin = infinite.animateFloat(
         0f, 360f,
         infiniteRepeatable(tween(4200, easing = LinearEasing), RepeatMode.Restart),
         label = "arc",
     )
-    val breathe by infinite.animateFloat(
+    val breathe = infinite.animateFloat(
         0f, 1f,
         infiniteRepeatable(tween(3400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "breathe",
     )
 
-    // Ambient loops are infinite, so they stay duration-based (springs can't
-    // loop). Under reduce-motion they freeze to a still frame.
-    val spinDeg = if (reduceMotion) 0f else spin
-    val arcDeg = if (reduceMotion) 0f else arcSpin
-    val breatheV = if (reduceMotion) 0f else breathe
+    // Theme-static gradient color lists, hoisted out of the 60 fps draw
+    // loop (the per-frame alpha-modulated ones must stay inside).
+    val arcColors = remember(tertiary) {
+        listOf(
+            Color.Transparent,
+            Color.Transparent,
+            Color.Transparent,
+            tertiary.copy(alpha = 0.0f),
+            tertiary.copy(alpha = 0.9f),
+            Color.White.copy(alpha = 0.7f),
+            Color.Transparent,
+        )
+    }
+    val orbColors = remember(primary, secondary, tertiary) {
+        listOf(primary, tertiary, secondary, primary)
+    }
+    val coreColors = remember {
+        listOf(
+            Surface0.copy(alpha = 0.94f),
+            Surface0.copy(alpha = 0.88f),
+            Surface0.copy(alpha = 0.0f),
+        )
+    }
 
     Canvas(modifier = modifier) {
+        // Ambient loops are infinite, so they stay duration-based (springs
+        // can't loop). Under reduce-motion they freeze to a still frame.
+        // Read here — in the draw phase — not in composition.
+        val spinDeg = if (reduceMotion) 0f else spin.value
+        val arcDeg = if (reduceMotion) 0f else arcSpin.value
+        val breatheV = if (reduceMotion) 0f else breathe.value
+        val conf = confidence()
+        val loud = loudness()
+
         val cx = size.width / 2f
         val cy = size.height / 2f
         val center = Offset(cx, cy)
         val baseR = min(size.width, size.height) / 2f * 0.58f
         val idleSwell = 1f + breatheV * 0.03f
-        val r = baseR * pulse.value * (1f + loudness * 0.10f) * idleSwell
+        val r = baseR * pulse.value * (1f + loud * 0.10f) * idleSwell
 
         // 1) Sonar rings (behind everything).
         for (ring in ripples) {
             val p = ring.value
             if (p >= 1f) continue
             val ringR = r * (0.92f + p * 1.35f)
-            val a = (1f - p) * (0.45f + confidence * 0.3f)
+            val a = (1f - p) * (0.45f + conf * 0.3f)
             drawCircle(
                 color = tertiary.copy(alpha = a),
                 radius = ringR,
@@ -173,7 +205,7 @@ fun BeatPulse(
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    primary.copy(alpha = 0.16f + confidence * 0.18f + flare.value * 0.15f),
+                    primary.copy(alpha = 0.16f + conf * 0.18f + flare.value * 0.15f),
                     tertiary.copy(alpha = 0.06f),
                     Color.Transparent,
                 ),
@@ -190,15 +222,7 @@ fun BeatPulse(
             rotate(arcDeg, pivot = center) {
                 drawCircle(
                     brush = Brush.sweepGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.Transparent,
-                            Color.Transparent,
-                            tertiary.copy(alpha = 0.0f),
-                            tertiary.copy(alpha = 0.9f),
-                            Color.White.copy(alpha = 0.7f),
-                            Color.Transparent,
-                        ),
+                        colors = arcColors,
                         center = center,
                     ),
                     radius = r * 1.16f,
@@ -224,7 +248,7 @@ fun BeatPulse(
             drawPath(
                 path = orb,
                 brush = Brush.sweepGradient(
-                    colors = listOf(primary, tertiary, secondary, primary),
+                    colors = orbColors,
                     center = center,
                 ),
                 style = Fill,
@@ -236,11 +260,7 @@ fun BeatPulse(
         //    rotation so it stays put under the text.
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    Surface0.copy(alpha = 0.94f),
-                    Surface0.copy(alpha = 0.88f),
-                    Surface0.copy(alpha = 0.0f),
-                ),
+                colors = coreColors,
                 center = center,
                 radius = r * 0.92f,
             ),

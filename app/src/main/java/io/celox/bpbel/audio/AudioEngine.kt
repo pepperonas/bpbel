@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Process
 import android.os.SystemClock
 import androidx.annotation.RequiresPermission
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -107,6 +108,10 @@ class AudioEngine {
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun captureLoop(session: Session) {
+        // Audio-capture priority so the 60 fps visualizer can't starve the
+        // analysis thread into buffer overruns / missed onsets.
+        Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,

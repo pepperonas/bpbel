@@ -9,7 +9,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -37,11 +36,13 @@ import kotlin.math.max
  * constant (e.g. exactly 0 in a quiet room), which would stall a
  * smoothing step keyed on level *changes*.
  *
- * @param level 0..1 loudness fraction (see [io.celox.bpbel.audio.AudioUiState.loudnessFraction]).
+ * @param level 0..1 loudness fraction (see [io.celox.bpbel.audio.AudioUiState.loudnessFraction]),
+ *   as a lambda: it is only invoked inside the per-frame smoothing loop,
+ *   so the ~43 Hz audio updates never recompose this composable.
  */
 @Composable
 fun DecibelMeter(
-    level: Float,
+    level: () -> Float,
     primary: Color,
     secondary: Color,
     tertiary: Color,
@@ -50,9 +51,8 @@ fun DecibelMeter(
 ) {
     var shown by remember { mutableFloatStateOf(0f) }
     var peak by remember { mutableFloatStateOf(0f) }
-    val target by rememberUpdatedState(level)
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(level) {
         // Per-second one-pole rates matching the previous per-emission
         // constants at 43 fps (attack 0.55/frame ≈ 34/s, release
         // 0.12/frame ≈ 5.5/s, peak fall 0.012/frame ≈ 0.5/s).
@@ -68,7 +68,7 @@ fun DecibelMeter(
                     ((now - lastNanos) / 1e9f).coerceIn(0f, 0.1f)
                 }
                 lastNanos = now
-                val t = target
+                val t = level()
                 val rate = if (t > shown) attackPerS else releasePerS
                 val k = 1f - exp(-rate * dt)
                 val newShown = shown + (t - shown) * k
@@ -81,6 +81,13 @@ fun DecibelMeter(
         }
     }
 
+    // Hoisted out of the draw loop — theme-static. The default
+    // horizontal-gradient bounds (0 → width) resolve at draw time, so
+    // this is identical to building it per frame with explicit endX.
+    val fill = remember(primary, secondary, tertiary) {
+        Brush.horizontalGradient(colors = listOf(tertiary, primary, secondary))
+    }
+
     Box(modifier = modifier.fillMaxWidth().height(34.dp)) {
         Canvas(modifier = Modifier.fillMaxWidth().height(34.dp)) {
             val segGap = 4f
@@ -88,12 +95,6 @@ fun DecibelMeter(
             val segW = (size.width - segGap * (segCount - 1)) / segCount
             val activeCount = (shown * segCount).toInt()
             val peakIndex = (peak * segCount).toInt().coerceIn(0, segCount - 1)
-
-            val fill = Brush.horizontalGradient(
-                colors = listOf(tertiary, primary, secondary),
-                startX = 0f,
-                endX = size.width,
-            )
 
             for (i in 0 until segCount) {
                 val x = i * (segW + segGap)
